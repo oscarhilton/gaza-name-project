@@ -1,88 +1,165 @@
+# Gaza Name Project
 
 ![screencapture-localhost-3000-2025-05-18-02_22_41](https://github.com/user-attachments/assets/10ebc083-08d0-4a35-97be-0bcd4c21a6b0)
 
-# Turborepo starter
+A full-stack application for recording and managing names, built with Next.js, Node.js, and PostgreSQL.
 
-This Turborepo starter is maintained by the Turborepo core team.
+## Project Overview
 
-## Using this example
+This project consists of:
+- Frontend: Next.js application with TypeScript
+- Backend: Node.js API server
+- Database: PostgreSQL
+- Audio Processing: FFmpeg for audio file handling
 
-Run the following command:
+## Prerequisites
 
-```sh
-npx create-turbo@latest
+- Docker and Docker Compose
+- Node.js 18+ (for local development)
+- pnpm (recommended) or npm
+- FFmpeg (for local development)
+
+## Quick Start with Docker
+
+1. Clone the repository:
+```bash
+git clone [repository-url]
+cd gaza-name-project
 ```
 
-## What's inside?
-
-This Turborepo includes the following packages/apps:
-
-### Apps and Packages
-
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-```
-cd my-turborepo
-pnpm build
+2. Start all services:
+```bash
+docker-compose up -d
 ```
 
-### Develop
+This will start:
+- Frontend (Next.js) on http://localhost:3000
+- Backend API on http://localhost:3001
+- PostgreSQL database on port 5432
 
-To develop all apps and packages, run the following command:
-
+3. To stop all services:
+```bash
+docker-compose down
 ```
-cd my-turborepo
+
+## Development Setup
+
+### Local Development
+
+1. Install dependencies:
+```bash
+pnpm install
+```
+
+2. Set up environment variables:
+```bash
+# Copy example env files
+cp apps/frontend/.env.example apps/frontend/.env
+cp apps/backend/.env.example apps/backend/.env
+```
+
+3. Start the development servers:
+```bash
+# Start all services
 pnpm dev
+
+# Or start specific services
+pnpm dev --filter frontend
+pnpm dev --filter backend
 ```
 
-### Remote Caching
+### Database Management
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+The project uses PostgreSQL with the following default credentials:
+- Database: gaza_name_project_db
+- User: gaza_name_user
+- Password: your_secure_password
+- Port: 5432
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
+To connect to the database:
+```bash
+# Using Docker
+docker exec -it gaza-name-project-db-1 psql -U gaza_name_user -d gaza_name_project_db
 
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-```
-cd my-turborepo
-npx turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-```
-npx turbo link
+# Using local PostgreSQL
+psql -U gaza_name_user -d gaza_name_project_db
 ```
 
-## Useful Links
+## Deployment Options
 
-Learn more about the power of Turborepo:
+### Option 1: Cloud Deployment (Recommended)
 
-- [Tasks](https://turborepo.com/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.com/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.com/docs/reference/configuration)
-- [CLI Usage](https://turborepo.com/docs/reference/command-line-reference)
-# gaza-name-project
+1. **AWS Setup**:
+   - Use AWS ECS for container orchestration
+   - RDS for PostgreSQL
+   - S3 for audio file storage
+   - CloudFront for CDN
+   - Route 53 for DNS
+
+2. **Google Cloud Platform**:
+   - Google Kubernetes Engine (GKE)
+   - Cloud SQL for PostgreSQL
+   - Cloud Storage for audio files
+   - Cloud CDN
+
+3. **DigitalOcean**:
+   - App Platform for container deployment
+   - Managed Databases for PostgreSQL
+   - Spaces for object storage
+
+### Option 2: Self-Hosting on Mac Mini
+
+1. **Prerequisites**:
+   - Mac Mini with macOS
+   - Docker Desktop for Mac
+   - Static IP or domain name
+   - SSL certificate (Let's Encrypt)
+
+2. **Setup Steps**:
+   ```bash
+   # Install Docker Desktop
+   brew install --cask docker
+
+   # Clone and run the project
+   git clone [repository-url]
+   cd gaza-name-project
+   docker-compose up -d
+   ```
+
+3. **Production Considerations**:
+   - Use a reverse proxy (Nginx/Traefik)
+   - Set up SSL with Let's Encrypt
+   - Configure automatic updates
+   - Set up monitoring (Prometheus/Grafana)
+   - Regular backups of PostgreSQL data
+
+## Project Structure
+
+```
+gaza-name-project/
+├── apps/
+│   ├── frontend/     # Next.js frontend application
+│   └── backend/      # Node.js API server
+├── packages/
+│   └── shared/       # Shared TypeScript types and utilities
+├── docker/
+│   ├── frontend/     # Frontend Dockerfile
+│   └── backend/      # Backend Dockerfile
+└── docker-compose.yml
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+[Your License Here]
+
+## Support
+
+For support, please [create an issue](repository-issues-url) in the repository.

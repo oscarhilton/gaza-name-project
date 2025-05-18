@@ -27,6 +27,9 @@ out/
 build
 dist
 
+# Backend directories
+apps/backend/processed/
+apps/backend/uploads/
 
 # Debug
 npm-debug.log*
