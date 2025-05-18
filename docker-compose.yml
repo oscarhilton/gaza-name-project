@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://backend:3001
+    networks:
+      - app-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DB_USER=gaza_name_user
+      - DB_HOST=postgres
+      - DB_NAME=gaza_name_project_db
+      - DB_PASSWORD=your_secure_password
+      - DB_PORT=5432
+    volumes:
+      - ./apps/backend/uploads:/usr/src/app/uploads
+      - ./apps/backend/processed:/usr/src/app/processed
+    networks:
+      - app-network
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=gaza_name_user
+      - POSTGRES_PASSWORD=your_secure_password
+      - POSTGRES_DB=gaza_name_project_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  seed:
+    image: curlimages/curl:latest
+    command: ["curl", "--retry", "10", "--retry-connrefused", "--retry-delay", "5", "http://backend:3001/api/fetch-and-store-martyrs"]
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data: 

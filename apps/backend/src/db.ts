@@ -1,11 +1,13 @@
 import { Pool } from 'pg';
+import path from 'path';
+import fs from 'fs';
 
 const pool = new Pool({
-  user: 'gaza_name_user', // Ensure this user and DB exist in your PostgreSQL
-  host: 'localhost',
-  database: 'gaza_name_project_db',
-  password: 'your_secure_password', // IMPORTANT: Replace with your actual password or use environment variables
-  port: 5432,
+  user: process.env.DB_USER || 'gaza_name_user',
+  host: process.env.DB_HOST || 'localhost',
+  database: process.env.DB_NAME || 'gaza_name_project_db',
+  password: process.env.DB_PASSWORD || 'your_secure_password',
+  port: parseInt(process.env.DB_PORT || '5432'),
 });
 
 export const connectToDB = async () => {
@@ -147,6 +149,27 @@ export const markNameAsRecorded = async (dbId: number) => {
   }
 };
 
+export const markNameAsUnrecorded = async (dbId: number) => {
+  if (!dbId) return { success: false, message: 'No ID provided.' };
+  const query = `
+    UPDATE martyrs
+    SET is_recorded = FALSE, recorded_at = NULL, processed_audio_path = NULL
+    WHERE db_id = $1
+    RETURNING db_id, en_name;
+  `;
+  try {
+    const { rows } = await pool.query(query, [dbId]);
+    if (rows && rows.length > 0) {
+      return { success: true, message: `Marked ${rows[0].en_name} as unrecorded.`, updatedName: rows[0] };
+    } else {
+      return { success: false, message: 'No name found with that ID.' };
+    }
+  } catch (err) {
+    console.error(`Error marking name ${dbId} as unrecorded:`, err);
+    return { success: false, message: 'DB error.', error: err };
+  }
+};
+
 export const updateProcessedAudioPath = async (dbId: number, filePath: string) => {
   if (!dbId || !filePath) return { success: false, message: 'Missing ID or path.' };
   const query = `UPDATE martyrs SET processed_audio_path = $2 WHERE db_id = $1;`;
@@ -197,6 +220,43 @@ export const getPaginatedRecordedSegments = async (page: number, limit: number) 
   } catch (err) {
     console.error('Error fetching paginated segments:', err);
     throw err;
+  }
+};
+
+export const checkAndCleanupMissingAudioFiles = async (processedDir: string) => {
+  const query = `
+    SELECT db_id, processed_audio_path
+    FROM martyrs
+    WHERE is_recorded = TRUE 
+    AND processed_audio_path IS NOT NULL 
+    AND processed_audio_path != '';
+  `;
+  
+  try {
+    const { rows } = await pool.query(query);
+    const missingFiles = [];
+    
+    for (const row of rows) {
+      const filePath = path.join(processedDir, row.processed_audio_path);
+      if (!fs.existsSync(filePath)) {
+        missingFiles.push(row.db_id);
+        await markNameAsUnrecorded(row.db_id);
+        console.log(`Marked name ${row.db_id} as unrecorded due to missing audio file: ${row.processed_audio_path}`);
+      }
+    }
+    
+    return {
+      success: true,
+      checkedCount: rows.length,
+      missingFilesCount: missingFiles.length,
+      missingFileIds: missingFiles
+    };
+  } catch (err) {
+    console.error('Error checking for missing audio files:', err);
+    return {
+      success: false,
+      error: err
+    };
   }
 };
 

@@ -12,9 +12,11 @@ import {
   insertMartyrs,
   getUnrecordedNames,
   markNameAsRecorded,
+  markNameAsUnrecorded,
   updateProcessedAudioPath,
   getRecordedAudioPaths,
-  getPaginatedRecordedSegments
+  getPaginatedRecordedSegments,
+  checkAndCleanupMissingAudioFiles
 } from './db';
 
 const app = express();
@@ -74,6 +76,18 @@ app.post('/api/upload-audio', upload.single('audio'), async (req: Request, res: 
         .on('end', async () => {
           console.log('FFmpeg processing finished for:', outputFileName);
           try {
+            // Check if the processed file exists
+            if (!fs.existsSync(outputPath)) {
+              console.error(`Processed file not found: ${outputPath}`);
+              await markNameAsUnrecorded(selectedNameId);
+              res.status(500).json({ 
+                message: 'Audio processing failed - file not found.',
+                error: 'Processed file was not created successfully'
+              });
+              resolve();
+              return;
+            }
+
             const markResult = await markNameAsRecorded(selectedNameId);
             const pathUpdateResult = await updateProcessedAudioPath(selectedNameId, outputFileName);
             console.log(`DB update for ID ${selectedNameId}: Mark=${markResult.success}, PathUpdate=${pathUpdateResult.success}`);
@@ -86,6 +100,8 @@ app.post('/api/upload-audio', upload.single('audio'), async (req: Request, res: 
             resolve();
           } catch (dbError: any) {
             console.error('DB error post-processing:', dbError);
+            // If there's a DB error, mark as unrecorded
+            await markNameAsUnrecorded(selectedNameId);
             res.status(500).json({ message: 'Audio processed, DB update failed.', dbError: dbError.message });
             reject(dbError);
           }
@@ -95,13 +111,10 @@ app.post('/api/upload-audio', upload.single('audio'), async (req: Request, res: 
   } catch (processingError: any) {
     console.error('Overall processing/DB error:', processingError.message);
     fs.unlink(inputPath, (err) => {if (err) console.error("Error deleting input file on error:", err);}); 
+    // Mark as unrecorded on processing error
+    await markNameAsUnrecorded(selectedNameId);
     if (!res.headersSent) {
       res.status(500).send(`Processing error: ${processingError.message}`);
-    }
-  } finally {
-    // Ensure original uploaded file is deleted if it still exists and wasn't moved/renamed by ffmpeg (save() creates new file)
-    if (inputPath !== outputPath && fs.existsSync(inputPath)){
-        fs.unlink(inputPath, (err) => {if (err) console.error("Error deleting original upload after processing:", err);});
     }
   }
 });
@@ -220,6 +233,41 @@ app.get('/api/recorded-segments', async (req: Request, res: Response) => {
     res.status(500).send(`Error fetching segments: ${error.message}`);
   }
 });
+
+app.get('/api/cleanup-missing-files', async (req: Request, res: Response) => {
+  try {
+    const result = await checkAndCleanupMissingAudioFiles(processedDir);
+    if (result.success) {
+      res.status(200).json({
+        message: 'Cleanup completed',
+        checkedCount: result.checkedCount,
+        missingFilesCount: result.missingFilesCount,
+        missingFileIds: result.missingFileIds
+      });
+    } else {
+      res.status(500).json({
+        message: 'Cleanup failed',
+        error: result.error
+      });
+    }
+  } catch (error: any) {
+    console.error('Cleanup error:', error);
+    res.status(500).send(`Cleanup error: ${error.message}`);
+  }
+});
+
+setInterval(async () => {
+  try {
+    const result = await checkAndCleanupMissingAudioFiles(processedDir);
+    if (result.success) {
+      console.log(`Periodic cleanup: Checked ${result.checkedCount} files, found ${result.missingFilesCount} missing files`);
+    } else {
+      console.error('Periodic cleanup failed:', result.error);
+    }
+  } catch (error) {
+    console.error('Periodic cleanup error:', error);
+  }
+}, 60 * 60 * 1000); // Run every hour
 
 wss.on('connection', (ws: WebSocket) => {
   console.log('Client connected via WebSocket');
