@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { Options as RecordRTCOptions } from 'recordrtc';
+import { VideoPlayer } from './VideoPlayer';
 
 interface RecordingControlsProps {
   selectedNameId: number | null;
@@ -292,51 +293,27 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
       {!recordedBlob ? (
         <>
-          <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-            {isRecording && (
-              <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium">
-                {formatTime(recordingTime)}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-end">
-              <button
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={!selectedNameId || isLoadingNames}
-                className={`px-6 py-3 rounded-xl text-base font-semibold shadow-lg transition-all duration-150 ${
-                  isRecording
-                    ? 'bg-red-500 hover:bg-red-600'
-                    : 'bg-teal-500 hover:bg-teal-600'
-                } text-white ${
-                  !selectedNameId || isLoadingNames
-                    ? 'opacity-50 cursor-not-allowed'
-                    : ''
-                }`}
-              >
-                {isRecording ? 'Stop Recording' : 'Start Recording'}
-              </button>
+          <VideoPlayer
+            ref={videoRef}
+            srcObject={streamRef.current}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover"
+          />
+          {isRecording && (
+            <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium">
+              {formatTime(recordingTime)}
             </div>
-          </div>
+          )}
         </>
       ) : (
         <div className="space-y-4">
-          <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-            <video
-              ref={previewVideoRef}
-              src={previewUrl || undefined}
-              controls
-              className="w-full h-full object-cover"
-            />
-          </div>
+          <VideoPlayer
+            src={previewUrl || undefined}
+            controls
+            className="w-full h-full object-cover"
+          />
           <div className="flex gap-4">
             <button
               onClick={handleRecordAgain}
