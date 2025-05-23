@@ -1,0 +1,39 @@
+.video-recorder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  background-color: #f5f5f5;
+  border-radius: 8px;
+}
+
+.video-recorder .video-js {
+  background-color: #000;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.video-recorder .controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.video-recorder button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  background-color: #007bff;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.video-recorder button:hover {
+  background-color: #0056b3;
+}
+
+.video-recorder button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+} 

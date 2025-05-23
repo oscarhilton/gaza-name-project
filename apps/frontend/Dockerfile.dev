@@ -1,0 +1,26 @@
+# Use Node.js LTS version
+FROM node:20-alpine
+
+# Create app directory
+WORKDIR /usr/src/app
+
+# Copy package files
+COPY package*.json ./
+
+# Install ALL dependencies (including dev dependencies)
+RUN npm install
+RUN npm install recordrtc @types/recordrtc
+
+# Copy the rest of the application
+COPY . .
+
+# Set environment variables
+ENV NODE_ENV=development
+ENV PORT=3000
+ENV NEXT_PUBLIC_API_URL=http://backend:3001
+
+# Expose the port
+EXPOSE 3000
+
+# Start the development server with hot-reloading
+CMD ["npm", "run", "dev"] 

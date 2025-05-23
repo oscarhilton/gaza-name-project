@@ -1,9 +1,10 @@
 # Use Node.js LTS version
 FROM node:20-slim
 
-# Install system dependencies including ffmpeg
+# Install system dependencies including ffmpeg and curl
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory

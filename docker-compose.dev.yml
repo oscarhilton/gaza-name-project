@@ -4,12 +4,16 @@ services:
   frontend:
     build:
       context: ./apps/frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
       - NEXT_PUBLIC_API_URL=http://localhost:3001
+    volumes:
+      - ./apps/frontend:/usr/src/app
+      - /usr/src/app/node_modules
+      - /usr/src/app/.next
     networks:
       - app-network
     depends_on:
@@ -20,11 +24,11 @@ services:
   backend:
     build:
       context: ./apps/backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     ports:
       - "3001:3001"
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
       - PORT=3001
       - DB_USER=gaza_name_user
       - DB_HOST=postgres
@@ -37,8 +41,10 @@ services:
       - MINIO_SECRET_KEY=minioadmin
       - MINIO_USE_SSL=false
     volumes:
-      - ./apps/backend/uploads:/usr/src/app/uploads
-      - ./apps/backend/processed:/usr/src/app/processed
+      - ./apps/backend:/usr/src/app
+      - /usr/src/app/node_modules
+      - /usr/src/app/uploads
+      - /usr/src/app/processed
     networks:
       - app-network
     depends_on:
