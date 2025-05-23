@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+'use client'
+
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { Options as RecordRTCOptions } from 'recordrtc';
-import { VideoPlayer } from './VideoPlayer';
+import { VideoPlayer, VideoPlayerHandle } from './VideoPlayer';
 
 interface RecordingControlsProps {
   selectedNameId: number | null;
@@ -21,7 +23,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   uploadStatus,
   onUpload
 }) => {
-  const [isClient, setIsClient] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -33,108 +34,79 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const videoPlayerRef = useRef<VideoPlayerHandle | null>(null);
+  const [showToast, setShowToast] = useState(false);
+  const lastRevokedUrlRef = useRef<string | null>(null);
 
-  // Initialize camera when component mounts
-  useEffect(() => {
-    console.log('Initializing camera...');
-    async function initCamera() {
-      try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30 }
-          },
-          audio: true
-        });
-        console.log('Camera initialized successfully:', {
-          tracks: mediaStream.getTracks().map(t => ({
-            kind: t.kind,
-            enabled: t.enabled,
-            readyState: t.readyState
-          }))
-        });
-        streamRef.current = mediaStream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-          console.log('Video element source set');
-        }
-      } catch (err) {
-        console.error('Error accessing media devices:', err);
-        setLocalError('Failed to access camera. Please ensure you have granted camera permissions.');
+  console.log(recordedBlob)
+
+  // DRY camera initialization
+  const initCamera = useCallback(async () => {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: true
+      });
+      streamRef.current = mediaStream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
       }
+    } catch (err) {
+      console.error('Camera init failed:', err);
+      setLocalError('Failed to access camera');
+      setShowToast(true);
     }
+  }, []);
 
-    if (isClient) {
-      initCamera();
-    }
-
+  // Use initCamera in mount effect
+  useEffect(() => {
+    initCamera();
     return () => {
-      console.log('Cleaning up camera...');
+      // Safe camera cleanup
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => {
-          console.log('Stopping track:', { kind: track.kind, readyState: track.readyState });
-          track.stop();
+          if (track.readyState === 'live') {
+            track.stop();
+          }
         });
+        streamRef.current = null;
       }
     };
-  }, [isClient]);
-
-  // Set isClient to true when component mounts
-  useEffect(() => {
-    console.log('Setting isClient to true');
-    setIsClient(true);
-  }, []);
+  }, [initCamera]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      console.log('Component unmounting, cleaning up...');
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
       }
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current.getTracks().forEach(track => {
+          if (track.readyState === 'live') {
+            track.stop();
+          }
+        });
+        streamRef.current = null;
       }
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
+        lastRevokedUrlRef.current = previewUrl;
       }
     };
   }, [previewUrl]);
 
   const startRecording = async () => {
-    console.log('Start recording called, current state:', {
-      isClient,
-      hasStream: !!streamRef.current,
-      isRecording
-    });
-
-    if (!isClient) {
-      console.error('Not in client context');
-      return;
-    }
-    if (!streamRef.current) {
-      console.error('No stream available');
-      setLocalError('Camera not initialized');
+    if (!videoPlayerRef.current?.canvas) {
+      setLocalError('Video is not ready yet.');
       return;
     }
     if (isRecording) {
-      console.error('Already recording');
       return;
     }
 
     try {
-      console.log('Importing RecordRTC...');
       const RecordRTC = (await import('recordrtc')).default;
-      
-      // Get video and audio tracks separately
-      const videoTrack = streamRef.current.getVideoTracks()[0];
-      const audioTrack = streamRef.current.getAudioTracks()[0];
-      
-      if (!videoTrack) {
-        throw new Error('No video track available');
-      }
-
+      const canvasStream = videoPlayerRef.current.canvas.captureStream(30); // 30 FPS
       const options: RecordRTCOptions = {
         type: 'video' as const,
         mimeType: 'video/webm',
@@ -142,34 +114,23 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         audioBitsPerSecond: 128000,
         frameRate: 30,
         disableLogs: false,
-        // Add additional options for better compatibility
         recorderType: RecordRTC.MediaStreamRecorder,
         numberOfAudioChannels: 1,
         desiredSampRate: 48000,
         ondataavailable: (blob: Blob) => {
-          console.log('Recording data available:', {
-            size: blob.size,
-            type: blob.type
-          });
-          // Only set the blob when recording is complete
           if (!isRecording && blob.size > 0) {
             setRecordedBlob(blob);
           }
         }
       };
-
-      console.log('Creating recorder with options:', options);
-      recorderRef.current = new RecordRTC(streamRef.current, options);
+      recorderRef.current = new RecordRTC(canvasStream, options);
       recorderRef.current.startRecording();
       setIsRecording(true);
       setLocalError(null);
-      console.log('Recording started successfully');
-
       // Timer
       const interval = setInterval(() => {
         setRecordingTime(prev => {
           const newTime = prev + 1;
-          // Stop recording after 30 seconds
           if (newTime >= 30) {
             stopRecording();
           }
@@ -178,44 +139,32 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       }, 1000);
       recordingIntervalRef.current = interval;
     } catch (err) {
-      console.error('Error starting recording:', err);
       setLocalError('Failed to start recording. Please try again.');
     }
   };
 
   const stopRecording = async () => {
-    console.log('Stop recording called, current state:', {
-      hasRecorder: !!recorderRef.current,
-      isRecording
-    });
-
     if (!recorderRef.current) {
-      console.error('No recorder available');
       return;
     }
-
     return new Promise<void>((resolve) => {
       recorderRef.current.stopRecording(() => {
         const blob = recorderRef.current!.getBlob();
-        console.log('Recording stopped, final blob details:', {
-          size: blob.size,
-          type: blob.type,
-          lastModified: blob.lastModified
-        });
-
-        // Stop the stream
-        streamRef.current?.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-
-        // Clear timers
+        // Safe camera cleanup
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => {
+            if (track.readyState === 'live') {
+              track.stop();
+            }
+          });
+          streamRef.current = null;
+        }
         if (recordingIntervalRef.current) {
           clearInterval(recordingIntervalRef.current);
           recordingIntervalRef.current = null;
         }
         setRecordingTime(0);
         setIsRecording(false);
-
-        // Create preview URL
         const url = URL.createObjectURL(blob);
         setPreviewUrl(url);
         setRecordedBlob(blob);
@@ -226,55 +175,37 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
   const handleUpload = async () => {
     if (!recordedBlob) {
-      console.error('No recorded blob available for upload');
       return;
     }
-
     try {
-      console.log('Starting upload of blob:', {
-        size: recordedBlob.size,
-        type: recordedBlob.type
-      });
       await onUpload(recordedBlob);
-      console.log('Upload completed successfully');
     } catch (error) {
-      console.error('Upload failed:', error);
       setLocalError(error instanceof Error ? error.message : 'Upload failed');
     }
   };
 
   const handleRecordAgain = () => {
-    console.log('Recording again...');
     setRecordedBlob(null);
     if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
+      if (lastRevokedUrlRef.current !== previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        lastRevokedUrlRef.current = previewUrl;
+      }
       setPreviewUrl(null);
     }
     // Reinitialize camera
-    if (isClient) {
-      navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 }
-        },
-        audio: true
-      }).then(mediaStream => {
-        streamRef.current = mediaStream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-        }
-      }).catch(err => {
-        console.error('Error reinitializing camera:', err);
-        setLocalError('Failed to reinitialize camera');
-      });
-    }
+    initCamera();
   };
 
-  // Don't render anything during SSR
-  if (!isClient) {
-    return null;
-  }
+  const canvasReady = !!videoPlayerRef.current?.canvas;
+
+  // Toast auto-hide
+  useEffect(() => {
+    if (showToast) {
+      const timer = setTimeout(() => setShowToast(false), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [showToast]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -294,7 +225,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       {!recordedBlob ? (
         <>
           <VideoPlayer
-            ref={videoRef}
+            ref={videoPlayerRef}
             srcObject={streamRef.current}
             autoPlay
             playsInline
@@ -305,6 +236,31 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium">
               {formatTime(recordingTime)}
             </div>
+          )}
+          {/* Show loading spinner/message until canvas is ready */}
+          {!canvasReady && (
+            <div className="flex items-center justify-center mt-4">
+              <div className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+              <span className="text-white text-sm">Loading video...</span>
+            </div>
+          )}
+          {/* Record button, only show when canvas is ready */}
+          {!isRecording ? (
+            <button
+              onClick={startRecording}
+              disabled={!canvasReady}
+              className={`mt-4 px-6 py-3 rounded-xl text-base font-semibold shadow-lg transition-all duration-150 ${!canvasReady ? 'bg-gray-500 cursor-not-allowed' : 'bg-teal-500 hover:bg-teal-600'} text-white`}
+            >
+              Start Recording
+            </button>
+          ) : (
+            <button
+              onClick={stopRecording}
+              disabled={!canvasReady}
+              className={`mt-4 px-6 py-3 rounded-xl text-base font-semibold shadow-lg transition-all duration-150 ${!canvasReady ? 'bg-gray-500 cursor-not-allowed' : 'bg-teal-500 hover:bg-teal-600'} text-white`}
+            >
+              Stop Recording
+            </button>
           )}
         </>
       ) : (
@@ -373,6 +329,13 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             className="bg-teal-500 h-2.5 rounded-full transition-all duration-300"
             style={{ width: `${uploadProgress}%` }}
           />
+        </div>
+      )}
+
+      {/* Toast for localError */}
+      {showToast && localError && (
+        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in">
+          {localError}
         </div>
       )}
     </div>

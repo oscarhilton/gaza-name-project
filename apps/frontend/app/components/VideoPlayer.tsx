@@ -1,10 +1,17 @@
-import React, { forwardRef, useEffect, useState, useRef } from 'react';
+'use client';
+
+import React, { forwardRef, useEffect, useState, useRef, useCallback, useImperativeHandle } from 'react';
 import * as facemesh from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
+import * as selfieSegmentation from '@mediapipe/selfie_segmentation';
 
 interface VideoPlayerProps extends React.VideoHTMLAttributes<HTMLVideoElement> {
   srcObject?: MediaStream | null;
   showHeadGuide?: boolean;
+  enableSegmentation?: boolean;
+  segmentationBackground?: 'transparent' | 'color' | 'blur' | 'image';
+  segmentationColor?: string;
+  backgroundImage?: string;
 }
 
 interface FacePosition {
@@ -19,7 +26,20 @@ interface FaceMeshResults {
   multiFaceLandmarks?: Array<Array<{ x: number; y: number; z: number }>>;
 }
 
-export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
+interface SegmentationResults {
+  image: HTMLCanvasElement;
+  segmentationMask: HTMLCanvasElement;
+}
+
+// Define a type for the ref object
+export interface VideoPlayerHandle {
+  video: HTMLVideoElement | null;
+  canvas: HTMLCanvasElement | null;
+}
+
+console.log('VideoPlayer component function running');
+
+export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
   src,
   srcObject,
   autoPlay = true,
@@ -28,31 +48,231 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
   className = '',
   onError,
   showHeadGuide = true,
+  enableSegmentation = true,
+  segmentationBackground = 'transparent',
+  segmentationColor = '#000000',
+  backgroundImage,
   ...props
 }, ref) => {
   const [facePosition, setFacePosition] = useState<FacePosition | null>(null);
+  const [isSegmentationReady, setIsSegmentationReady] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const faceMeshRef = useRef<facemesh.FaceMesh | null>(null);
   const cameraRef = useRef<Camera | null>(null);
-  const videoRef = ref as React.RefObject<HTMLVideoElement>;
+  const videoElementRef = useRef<HTMLVideoElement>(null);
+  useImperativeHandle(ref, () => {
+    return {
+      video: videoElementRef.current,
+      canvas: canvasRef.current,
+    };
+  });
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const segmentationRef = useRef<selfieSegmentation.SelfieSegmentation | null>(null);
+  const animationFrameRef = useRef<number>();
+  const backgroundImageRef = useRef<HTMLImageElement | null>(null);
+
+  // Load background image
+  useEffect(() => {
+    if (segmentationBackground === 'image' && backgroundImage) {
+      setIsLoading(true);
+      setError(null);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = backgroundImage;
+      img.onload = () => {
+        backgroundImageRef.current = img;
+        setIsLoading(false);
+      };
+      img.onerror = () => {
+        setError('Failed to load background image');
+        setIsLoading(false);
+      };
+    } else {
+      backgroundImageRef.current = null;
+    }
+  }, [segmentationBackground, backgroundImage]);
 
   useEffect(() => {
-    const videoElement = videoRef.current;
-    if (!videoElement) return;
-
+    if (!videoElementRef.current) return;
+    const videoElement = videoElementRef.current;
     const handleError = (error: any) => {
       console.error('Video playback error:', error);
       onError?.(error);
     };
-
     videoElement.addEventListener('error', handleError);
     return () => {
       videoElement.removeEventListener('error', handleError);
     };
-  }, [onError, videoRef]);
+  }, [onError]);
+
+  // Cleanup function for segmentation
+  const cleanupSegmentation = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = undefined;
+    }
+    if (segmentationRef.current) {
+      segmentationRef.current.close();
+      segmentationRef.current = null;
+    }
+    if (cameraRef.current) {
+      cameraRef.current.stop();
+      cameraRef.current = null;
+    }
+    setIsSegmentationReady(false);
+    setError(null);
+  }, []);
+
+  // Initialize segmentation function
+  const initializeSegmentation = useCallback(async () => {
+    if (!videoElementRef.current) return;
+    if (!enableSegmentation || !srcObject || !videoElementRef.current || !canvasRef.current) {
+      cleanupSegmentation();
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // Cleanup any existing segmentation
+      cleanupSegmentation();
+
+      const segmentation = new selfieSegmentation.SelfieSegmentation({
+        locateFile: (file: string) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+        }
+      });
+
+      segmentation.setOptions({
+        modelSelection: 1, // 0 for general, 1 for landscape
+      });
+
+      segmentation.onResults((results) => {
+        if (!canvasRef.current || !videoElementRef.current) return;
+
+        const ctx = canvasRef.current.getContext('2d');
+        if (!ctx) return;
+
+        // Clear canvas
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+
+        // Draw background based on selected mode
+        if (segmentationBackground === 'color') {
+          ctx.fillStyle = segmentationColor;
+          ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        } else if (segmentationBackground === 'blur') {
+          // Draw blurred video as background
+          ctx.filter = 'blur(10px)';
+          ctx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
+          ctx.filter = 'none';
+        } else if (segmentationBackground === 'image') {
+          if (backgroundImageRef.current) {
+            // Draw background image
+            const { width, height } = canvasRef.current;
+            const img = backgroundImageRef.current;
+            
+            // Calculate aspect ratios
+            const imgRatio = img.width / img.height;
+            const canvasRatio = width / height;
+            
+            let drawWidth = width;
+            let drawHeight = height;
+            let offsetX = 0;
+            let offsetY = 0;
+            
+            if (imgRatio > canvasRatio) {
+              // Image is wider than canvas
+              drawHeight = width / imgRatio;
+              offsetY = (height - drawHeight) / 2;
+            } else {
+              // Image is taller than canvas
+              drawWidth = height * imgRatio;
+              offsetX = (width - drawWidth) / 2;
+            }
+            
+            ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+          } else {
+            // Draw black background if no image is provided
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+          }
+        }
+
+        // Draw the person using the segmentation mask
+        if (segmentationBackground === 'transparent') {
+          // 1. Draw the segmentation mask, blurred for feathering
+          ctx.save();
+          ctx.filter = 'blur(30px)'; // Adjust blur radius as needed
+          ctx.drawImage(results.segmentationMask, 0, 0, canvasRef.current.width, canvasRef.current.height);
+          ctx.filter = 'none';
+          // 2. Use 'source-in' to keep only the person
+          ctx.globalCompositeOperation = 'source-in';
+          ctx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.restore();
+        } else {
+          // For other backgrounds:
+          // 1. Draw the mask
+          // 2. Use it to show only the person from the video
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.drawImage(results.segmentationMask, 0, 0, canvasRef.current.width, canvasRef.current.height);
+          ctx.globalCompositeOperation = 'source-in';
+          ctx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        }
+        
+        // Reset composite operation
+        ctx.globalCompositeOperation = 'source-over';
+      });
+
+      segmentationRef.current = segmentation;
+
+      // Initialize camera
+      if (videoElementRef.current) {
+        const camera = new Camera(videoElementRef.current, {
+          onFrame: async () => {
+            if (videoElementRef.current && segmentationRef.current) {
+              await segmentationRef.current.send({ image: videoElementRef.current });
+            }
+          },
+          width: 1280,
+          height: 720
+        });
+
+        cameraRef.current = camera;
+        await camera.start();
+        setIsSegmentationReady(true);
+        setIsLoading(false);
+      }
+
+      // Start processing frames
+      const processFrame = async () => {
+        if (videoElementRef.current && segmentationRef.current) {
+          await segmentationRef.current.send({ image: videoElementRef.current });
+          animationFrameRef.current = requestAnimationFrame(processFrame);
+        }
+      };
+
+      processFrame();
+    } catch (error) {
+      console.error('Error initializing segmentation:', error);
+      setError('Failed to initialize segmentation');
+      setIsLoading(false);
+      cleanupSegmentation();
+    }
+  }, [enableSegmentation, srcObject, segmentationBackground, segmentationColor, backgroundImage, cleanupSegmentation]);
+
+  // Initialize segmentation effect
+  useEffect(() => {
+    initializeSegmentation();
+    return cleanupSegmentation;
+  }, [initializeSegmentation, cleanupSegmentation]);
 
   // Initialize FaceMesh
   useEffect(() => {
-    if (!showHeadGuide || !srcObject || !videoRef.current) return;
+    if (!videoElementRef.current) return;
+    if (!showHeadGuide || !srcObject || !videoElementRef.current) return;
 
     const initializeFaceMesh = async () => {
       const faceMesh = new facemesh.FaceMesh({
@@ -69,7 +289,6 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
       });
 
       faceMesh.onResults((results: FaceMeshResults) => {
-        console.log('results', results);
         if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
           const landmarks = results.multiFaceLandmarks[0];
           
@@ -109,11 +328,11 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
       faceMeshRef.current = faceMesh;
 
       // Initialize camera
-      if (videoRef.current) {
-        const camera = new Camera(videoRef.current, {
+      if (videoElementRef.current) {
+        const camera = new Camera(videoElementRef.current, {
           onFrame: async () => {
-            if (videoRef.current) {
-              await faceMesh.send({ image: videoRef.current });
+            if (videoElementRef.current) {
+              await faceMesh.send({ image: videoElementRef.current });
             }
           },
           width: 1280,
@@ -135,28 +354,53 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
         faceMeshRef.current.close();
       }
     };
-  }, [showHeadGuide, srcObject, videoRef]);
+  }, [showHeadGuide, srcObject, videoElementRef]);
 
   const videoProps = {
-    ref,
+    ref: videoElementRef,
     src,
-    srcObject,
     autoPlay,
     playsInline: true,
     muted,
     controls,
     className: `w-full h-full object-cover ${className}`,
     ...props
-  } as React.VideoHTMLAttributes<HTMLVideoElement> & { srcObject?: MediaStream | null };
+  } as React.VideoHTMLAttributes<HTMLVideoElement>;
+
+  // Set srcObject directly on the video element
+  useEffect(() => {
+    if (!videoElementRef.current) return;
+    if (videoElementRef.current) {
+      videoElementRef.current.srcObject = srcObject || null;
+    }
+  }, [srcObject]);
 
   const getOverlayColor = () => {
     if (!facePosition) return 'border-white/50';
     return facePosition.isAligned ? 'border-green-500' : 'border-red-500';
   };
 
+  useEffect(() => {
+    console.log('canvasRef after mount', canvasRef.current);
+  }, []);
+
   return (
     <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-      <video {...videoProps} />
+      <video
+        {...videoProps}
+        style={{
+          visibility: enableSegmentation ? 'hidden' : 'visible',
+          // Optionally: opacity: enableSegmentation ? 0 : 1,
+        }}
+      />
+      {enableSegmentation && (
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 w-full h-full"
+          width={1280}
+          height={720}
+        />
+      )}
       {showHeadGuide && (
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
           <div 
@@ -167,6 +411,36 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(({
               height: `${facePosition.height * 1.5}%`
             } : undefined}
           />
+        </div>
+      )}
+      {/* Loading Overlay */}
+      {isLoading && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+            <p className="text-white text-sm">Initializing segmentation...</p>
+          </div>
+        </div>
+      )}
+      {/* Error Overlay */}
+      {error && (
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+          <div className="bg-red-500/90 text-white px-4 py-2 rounded-lg shadow-lg">
+            <p className="text-sm font-medium">{error}</p>
+            <button
+              onClick={() => {
+                setError(null);
+                setIsLoading(true);
+                // Re-initialize segmentation
+                if (videoElementRef.current && canvasRef.current) {
+                  initializeSegmentation();
+                }
+              }}
+              className="mt-2 text-xs underline hover:text-white/80"
+            >
+              Try Again
+            </button>
+          </div>
         </div>
       )}
     </div>
