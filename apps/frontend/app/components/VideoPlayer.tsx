@@ -70,28 +70,6 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const segmentationRef = useRef<selfieSegmentation.SelfieSegmentation | null>(null);
   const animationFrameRef = useRef<number>();
-  const backgroundImageRef = useRef<HTMLImageElement | null>(null);
-
-  // Load background image
-  useEffect(() => {
-    if (segmentationBackground === 'image' && backgroundImage) {
-      setIsLoading(true);
-      setError(null);
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = backgroundImage;
-      img.onload = () => {
-        backgroundImageRef.current = img;
-        setIsLoading(false);
-      };
-      img.onerror = () => {
-        setError('Failed to load background image');
-        setIsLoading(false);
-      };
-    } else {
-      backgroundImageRef.current = null;
-    }
-  }, [segmentationBackground, backgroundImage]);
 
   useEffect(() => {
     if (!videoElementRef.current) return;
@@ -157,71 +135,31 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
 
         // Clear canvas
         ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(results.segmentationMask, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        ctx.globalCompositeOperation = 'source-in';
+        ctx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
 
-        // Draw background based on selected mode
-        if (segmentationBackground === 'color') {
-          ctx.fillStyle = segmentationColor;
-          ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-        } else if (segmentationBackground === 'blur') {
-          // Draw blurred video as background
-          ctx.filter = 'blur(10px)';
-          ctx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
-          ctx.filter = 'none';
-        } else if (segmentationBackground === 'image') {
-          if (backgroundImageRef.current) {
-            // Draw background image
-            const { width, height } = canvasRef.current;
-            const img = backgroundImageRef.current;
-            
-            // Calculate aspect ratios
-            const imgRatio = img.width / img.height;
-            const canvasRatio = width / height;
-            
-            let drawWidth = width;
-            let drawHeight = height;
-            let offsetX = 0;
-            let offsetY = 0;
-            
-            if (imgRatio > canvasRatio) {
-              // Image is wider than canvas
-              drawHeight = width / imgRatio;
-              offsetY = (height - drawHeight) / 2;
-            } else {
-              // Image is taller than canvas
-              drawWidth = height * imgRatio;
-              offsetX = (width - drawWidth) / 2;
-            }
-            
-            ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
-          } else {
-            // Draw black background if no image is provided
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-          }
-        }
+        ctx.globalCompositeOperation = 'source-over';
 
-        // Draw the person using the segmentation mask
-        if (segmentationBackground === 'transparent') {
-          // 1. Draw the segmentation mask, blurred for feathering
-          ctx.save();
-          ctx.filter = 'blur(30px)'; // Adjust blur radius as needed
-          ctx.drawImage(results.segmentationMask, 0, 0, canvasRef.current.width, canvasRef.current.height);
-          ctx.filter = 'none';
-          // 2. Use 'source-in' to keep only the person
-          ctx.globalCompositeOperation = 'source-in';
-          ctx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.restore();
-        } else {
-          // For other backgrounds:
-          // 1. Draw the mask
-          // 2. Use it to show only the person from the video
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.drawImage(results.segmentationMask, 0, 0, canvasRef.current.width, canvasRef.current.height);
-          ctx.globalCompositeOperation = 'source-in';
-          ctx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
-        }
+        const centerX = canvasRef.current.width / 2;
+        const centerY = canvasRef.current.height / 2;
+        const radius = Math.min(canvasRef.current.width, canvasRef.current.height) / 2;
+
+        // Create radial gradient
+        const gradient = ctx.createRadialGradient(centerX, centerY, radius * 0.8, centerX, centerY, radius);
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.95)');
+
+        // Draw gradient vignette
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
         
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.filter = 'blur(100px)';
+        ctx.drawImage(results.image, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        ctx.filter = 'none';
+
         // Reset composite operation
         ctx.globalCompositeOperation = 'source-over';
       });
@@ -268,6 +206,20 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
     initializeSegmentation();
     return cleanupSegmentation;
   }, [initializeSegmentation, cleanupSegmentation]);
+
+  useEffect(() => {
+    const video = videoElementRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+  
+    const handleLoadedMetadata = () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    };
+  
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    return () => video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+  }, []);
 
   // Initialize FaceMesh
   useEffect(() => {

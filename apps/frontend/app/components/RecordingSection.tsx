@@ -1,8 +1,15 @@
+'use client'
+
 import React, { useState, useCallback } from 'react';
 import { UnrecordedName } from './types';
 import { NameSelector } from './NameSelector';
-import { RecordingControls } from './RecordingControls';
+import dynamic from 'next/dynamic';
 import { v4 as uuidv4 } from 'uuid';
+
+// Dynamically import RecordingControls to ensure browser APIs are only used on client
+const RecordingControls = dynamic(() => import('./RecordingControls').then(mod => mod.RecordingControls), {
+  ssr: false,
+});
 
 interface RecordingSectionProps {
   availableNames: UnrecordedName[];

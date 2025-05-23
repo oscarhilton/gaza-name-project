@@ -2,7 +2,13 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { Options as RecordRTCOptions } from 'recordrtc';
-import { VideoPlayer, VideoPlayerHandle } from './VideoPlayer';
+import dynamic from 'next/dynamic';
+import type { VideoPlayerHandle } from './VideoPlayer';
+
+// Dynamically import VideoPlayer to ensure browser APIs are only used on client
+const VideoPlayer = dynamic(() => import('./VideoPlayer').then(mod => mod.VideoPlayer), {
+  ssr: false,
+});
 
 interface RecordingControlsProps {
   selectedNameId: number | null;
@@ -37,8 +43,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const videoPlayerRef = useRef<VideoPlayerHandle | null>(null);
   const [showToast, setShowToast] = useState(false);
   const lastRevokedUrlRef = useRef<string | null>(null);
-
-  console.log(recordedBlob)
 
   // DRY camera initialization
   const initCamera = useCallback(async () => {
@@ -108,15 +112,12 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       const RecordRTC = (await import('recordrtc')).default;
       const canvasStream = videoPlayerRef.current.canvas.captureStream(30); // 30 FPS
       const options: RecordRTCOptions = {
-        type: 'video' as const,
-        mimeType: 'video/webm',
-        videoBitsPerSecond: 1000000,
-        audioBitsPerSecond: 128000,
+        type: 'video',
+        mimeType: 'video/webm;codecs=vp9',
+        videoBitsPerSecond: 10000000,
+        recorderType: RecordRTC.MediaStreamRecorder,
         frameRate: 30,
         disableLogs: false,
-        recorderType: RecordRTC.MediaStreamRecorder,
-        numberOfAudioChannels: 1,
-        desiredSampRate: 48000,
         ondataavailable: (blob: Blob) => {
           if (!isRecording && blob.size > 0) {
             setRecordedBlob(blob);
@@ -224,7 +225,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       </div>
 
       {!recordedBlob ? (
-        <>
+        <div className="relative">
           <VideoPlayer
             ref={videoPlayerRef}
             srcObject={streamRef.current}
@@ -263,7 +264,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
               Stop Recording
             </button>
           )}
-        </>
+        </div>
       ) : (
         <div className="space-y-4">
           <video
