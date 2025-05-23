@@ -166,6 +166,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         setRecordingTime(0);
         setIsRecording(false);
         const url = URL.createObjectURL(blob);
+        console.log(url)
         setPreviewUrl(url);
         setRecordedBlob(blob);
         resolve();
@@ -265,7 +266,7 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         </>
       ) : (
         <div className="space-y-4">
-          <VideoPlayer
+          <video
             src={previewUrl || undefined}
             controls
             className="w-full h-full object-cover"
