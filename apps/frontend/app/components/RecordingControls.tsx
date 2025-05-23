@@ -46,11 +46,11 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<any>(null);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const videoPlayerRef = useRef<VideoPlayerHandle | null>(null);
   const [showToast, setShowToast] = useState(false);
   const lastRevokedUrlRef = useRef<string | null>(null);
+  const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
+  const [isReadyToRecord, setIsReadyToRecord] = useState(false);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -74,17 +74,16 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   }, [previewUrl]);
 
   const startRecording = async () => {
-    if (!videoPlayerRef.current?.canvas) {
+    if (!canvas) {
       setLocalError('Video is not ready yet.');
       return;
     }
     if (isRecording) {
       return;
     }
-
     try {
       const RecordRTC = (await import('recordrtc')).default;
-      const canvasStream = videoPlayerRef.current.canvas.captureStream(30); // 30 FPS
+      const canvasStream = canvas.captureStream(30); // 30 FPS
       const options: RecordRTCOptions = {
         type: 'video',
         mimeType: 'video/webm;codecs=vp9',
@@ -171,10 +170,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     }
   };
 
-  console.log(videoPlayerRef.current)
-
-  const canvasReady = !!videoPlayerRef.current?.canvas;
-
   // Toast auto-hide
   useEffect(() => {
     if (showToast) {
@@ -206,33 +201,35 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
             playsInline
             muted
             className="w-full h-full object-cover"
+            onReadyToRecord={() => setIsReadyToRecord(true)}
+            onCanvasRef={setCanvas}
           />
           {isRecording && (
             <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium">
               {formatTime(recordingTime)}
             </div>
           )}
-          {/* Show loading spinner/message until canvas is ready */}
-          {!canvasReady && (
+          {/* Show loading spinner/message until ready to record */}
+          {!isReadyToRecord && (
             <div className="flex items-center justify-center mt-4">
               <div className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin mr-2" />
               <span className="text-white text-sm">Loading video...</span>
             </div>
           )}
-          {/* Record button, only show when canvas is ready */}
+          {/* Record button, only show when ready to record */}
           {!isRecording ? (
             <button
               onClick={startRecording}
-              disabled={!canvasReady}
-              className={`mt-4 px-6 py-3 rounded-xl text-base font-semibold shadow-lg transition-all duration-150 ${!canvasReady ? 'bg-gray-500 cursor-not-allowed' : 'bg-teal-500 hover:bg-teal-600'} text-white`}
+              disabled={!isReadyToRecord}
+              className={`mt-4 px-6 py-3 rounded-xl text-base font-semibold shadow-lg transition-all duration-150 ${!isReadyToRecord ? 'bg-gray-500 cursor-not-allowed' : 'bg-teal-500 hover:bg-teal-600'} text-white`}
             >
               Start Recording
             </button>
           ) : (
             <button
               onClick={stopRecording}
-              disabled={!canvasReady}
-              className={`mt-4 px-6 py-3 rounded-xl text-base font-semibold shadow-lg transition-all duration-150 ${!canvasReady ? 'bg-gray-500 cursor-not-allowed' : 'bg-teal-500 hover:bg-teal-600'} text-white`}
+              disabled={!isReadyToRecord}
+              className={`mt-4 px-6 py-3 rounded-xl text-base font-semibold shadow-lg transition-all duration-150 ${!isReadyToRecord ? 'bg-gray-500 cursor-not-allowed' : 'bg-teal-500 hover:bg-teal-600'} text-white`}
             >
               Stop Recording
             </button>

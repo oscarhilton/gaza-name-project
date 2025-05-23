@@ -12,6 +12,8 @@ interface VideoPlayerProps extends React.VideoHTMLAttributes<HTMLVideoElement> {
   segmentationBackground?: 'transparent' | 'color' | 'blur' | 'image';
   segmentationColor?: string;
   backgroundImage?: string;
+  onReadyToRecord?: () => void;
+  onCanvasRef?: (canvas: HTMLCanvasElement | null) => void;
 }
 
 interface FacePosition {
@@ -24,11 +26,6 @@ interface FacePosition {
 
 interface FaceMeshResults {
   multiFaceLandmarks?: Array<Array<{ x: number; y: number; z: number }>>;
-}
-
-interface SegmentationResults {
-  image: HTMLCanvasElement;
-  segmentationMask: HTMLCanvasElement;
 }
 
 // Define a type for the ref object
@@ -52,6 +49,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
   segmentationBackground = 'transparent',
   segmentationColor = '#000000',
   backgroundImage,
+  onReadyToRecord,
+  onCanvasRef,
   ...props
 }, ref) => {
   const [facePosition, setFacePosition] = useState<FacePosition | null>(null);
@@ -73,6 +72,22 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
 
   // Add a ref to track if segmentation/facemesh are initialized
   const isSegmentationInitialized = useRef(false);
+
+  // Notify parent when ready to record
+  const hasNotifiedReadyRef = useRef(false);
+  useEffect(() => {
+    if (
+      !hasNotifiedReadyRef.current &&
+      onReadyToRecord &&
+      videoElementRef.current &&
+      canvasRef.current &&
+      !videoElementRef.current.paused &&
+      videoElementRef.current.readyState >= 2 // HAVE_CURRENT_DATA
+    ) {
+      hasNotifiedReadyRef.current = true;
+      onReadyToRecord();
+    }
+  }, [onReadyToRecord, videoElementRef.current, canvasRef.current]);
 
   useEffect(() => {
     if (!videoElementRef.current) return;
@@ -125,6 +140,43 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
     ctx.globalCompositeOperation = 'source-over';
   };
 
+  const handleFaceMeshResults = (results: FaceMeshResults) => {
+      if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+        const landmarks = results.multiFaceLandmarks[0];
+        
+        // Calculate face bounds
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        landmarks.forEach((landmark: { x: number; y: number }) => {
+          minX = Math.min(minX, landmark.x);
+          minY = Math.min(minY, landmark.y);
+          maxX = Math.max(maxX, landmark.x);
+          maxY = Math.max(maxY, landmark.y);
+        });
+
+        const width = maxX - minX;
+        const height = maxY - minY;
+        const centerX = minX + width / 2;
+        const centerY = minY + height / 2;
+
+        // Check if face is aligned (within 20% of center)
+        const isAligned = 
+          Math.abs(centerX - 0.5) < 0.2 && 
+          Math.abs(centerY - 0.5) < 0.2 &&
+          width > 0.2 && width < 0.8 && // Face size constraints
+          height > 0.2 && height < 0.8;
+
+        setFacePosition({
+          x: centerX * 100,
+          y: centerY * 100,
+          width: width * 100,
+          height: height * 100,
+          isAligned
+        });
+      } else {
+        setFacePosition(null);
+      }
+  }
+
   // Remove segmentation/facemesh setup from onActive
   const onActive = () => {
     console.log('[MediaStream] active event');
@@ -157,43 +209,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
             minDetectionConfidence: 0.5,
             minTrackingConfidence: 0.5
           });
-          faceMeshInstance.current.onResults((results: FaceMeshResults) => {
-              console.log('[FaceMesh] results', results);
-              if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-                const landmarks = results.multiFaceLandmarks[0];
-                
-                // Calculate face bounds
-                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                landmarks.forEach((landmark: { x: number; y: number }) => {
-                  minX = Math.min(minX, landmark.x);
-                  minY = Math.min(minY, landmark.y);
-                  maxX = Math.max(maxX, landmark.x);
-                  maxY = Math.max(maxY, landmark.y);
-                });
-      
-                const width = maxX - minX;
-                const height = maxY - minY;
-                const centerX = minX + width / 2;
-                const centerY = minY + height / 2;
-      
-                // Check if face is aligned (within 20% of center)
-                const isAligned = 
-                  Math.abs(centerX - 0.5) < 0.2 && 
-                  Math.abs(centerY - 0.5) < 0.2 &&
-                  width > 0.2 && width < 0.8 && // Face size constraints
-                  height > 0.2 && height < 0.8;
-      
-                setFacePosition({
-                  x: centerX * 100,
-                  y: centerY * 100,
-                  width: width * 100,
-                  height: height * 100,
-                  isAligned
-                });
-              } else {
-                setFacePosition(null);
-              }
-          });
+          faceMeshInstance.current.onResults(handleFaceMeshResults);
         }
 
         isSegmentationInitialized.current = true;
@@ -285,6 +301,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
     }
   }, [isStreamActive]);
 
+  useEffect(() => {
+    if (onCanvasRef) onCanvasRef(canvasRef.current);
+  }, [canvasRef.current, onCanvasRef]);
+
   const videoProps = {
     ref: videoElementRef,
     src,
@@ -312,10 +332,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(({
         />
       {enableSegmentation && (
         <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full"
-        width={1280}
-        height={720}
+          ref={canvasRef}
+          className="absolute inset-0 w-full h-full"
+          width={1280}
+          height={720}
         />
       )}
       {showHeadGuide && (
