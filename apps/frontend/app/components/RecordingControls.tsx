@@ -8,6 +8,14 @@ import type { VideoPlayerHandle } from './VideoPlayer';
 // Dynamically import VideoPlayer to ensure browser APIs are only used on client
 const VideoPlayer = dynamic(() => import('./VideoPlayer').then(mod => mod.VideoPlayer), {
   ssr: false,
+  loading: () => (
+    <div className="bg-slate-800 shadow-2xl rounded-2xl p-6 md:p-10 space-y-8 ring-1 ring-slate-700">
+      <div className="animate-pulse">
+        <div className="h-8 bg-slate-700 rounded w-1/3 mb-8"></div>
+        <div className="h-64 bg-slate-700 rounded"></div>
+      </div>
+    </div>
+  ),
 });
 
 interface RecordingControlsProps {
@@ -43,40 +51,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   const videoPlayerRef = useRef<VideoPlayerHandle | null>(null);
   const [showToast, setShowToast] = useState(false);
   const lastRevokedUrlRef = useRef<string | null>(null);
-
-  // DRY camera initialization
-  const initCamera = useCallback(async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-        audio: true
-      });
-      streamRef.current = mediaStream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
-    } catch (err) {
-      console.error('Camera init failed:', err);
-      setLocalError('Failed to access camera');
-      setShowToast(true);
-    }
-  }, []);
-
-  // Use initCamera in mount effect
-  useEffect(() => {
-    initCamera();
-    return () => {
-      // Safe camera cleanup
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => {
-          if (track.readyState === 'live') {
-            track.stop();
-          }
-        });
-        streamRef.current = null;
-      }
-    };
-  }, [initCamera]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -195,9 +169,9 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
       }
       setPreviewUrl(null);
     }
-    // Reinitialize camera
-    initCamera();
   };
+
+  console.log(videoPlayerRef.current)
 
   const canvasReady = !!videoPlayerRef.current?.canvas;
 
@@ -228,7 +202,6 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
         <div className="relative">
           <VideoPlayer
             ref={videoPlayerRef}
-            srcObject={streamRef.current}
             autoPlay
             playsInline
             muted
